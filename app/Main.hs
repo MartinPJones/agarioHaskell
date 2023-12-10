@@ -16,6 +16,7 @@ data World = World {
     timePassed :: Float
 } deriving Show
 
+-- Intial frame size
 width, height :: Int
 width = 800
 height = 600
@@ -29,7 +30,7 @@ randomPosition g =
         (genX, newGenY) = randomR (-700, 700) g -- Generates dots in bounds, change ints to change bounds
         x = genX
         (genY, newGen) = randomR (-700, 700) newGenY
-        y = genY 
+        y = genY
     in (x, y)
 
 initialWorld :: World
@@ -46,7 +47,7 @@ initialWorld = World {
 areColliding :: World -> Position -> Bool
 areColliding world (x2, y2) =
     let (x1, y1) = circlePos world
-    in sqrt ((x2 - x1)^2 + (y2 - y1)^2) < radius world + otherRadius world 
+    in sqrt ((x2 - x1)^2 + (y2 - y1)^2) < radius world + otherRadius world
 
 moveTowardsMouse :: Float -> Position -> World -> World
 moveTowardsMouse deltaTime (mouseX, mouseY) world =
@@ -54,7 +55,7 @@ moveTowardsMouse deltaTime (mouseX, mouseY) world =
         maxSpeed = 20.0  -- You can adjust the maximum speed here
         directionX = mouseX - cx
         directionY = mouseY - cy
-        distance = sqrt (directionX ^ 2 + directionY ^ 2) 
+        distance = sqrt (directionX ^ 2 + directionY ^ 2)
         (currentVelX, currentVelY) = circleVel world
         (newVelX, newVelY) = if distance == 0 -- Idk why I thought this was a good idea. Need to change it to if mouse position hasn't been updated, maintain current velocity
                                 then (currentVelX, currentVelY) -- Retain current velocity if no movement
@@ -71,7 +72,9 @@ timeThreshold = 5.0  -- Change this value as needed for the interval between new
 
 updateWorld :: Float -> StdGen -> World -> World
 updateWorld deltaTime gen world =
-    let updatedWorld = moveTowardsMouse deltaTime (mousePosToWorldCoords world) world
+    let
+        -- updatedWorld = moveTowardsMouse deltaTime (mousePosToWorldCoords world) world
+        updatedWorld = world
 
         -- Update the timer by adding the elapsed time
         newTimer = deltaTime + timePassed world
@@ -93,7 +96,7 @@ updateWorld deltaTime gen world =
         -- Check for collisions after potential updates
         collidedPositions = filter (areColliding updatedWorld) (otherCircles updatedWorld)
     in if not (null collidedPositions)
-        then let newRadius = radius updatedWorld * 1.2
+        then let newRadius = radius updatedWorld + 3 -- Amount to increase size by
                  updatedCircles = filter (not . (`elem` collidedPositions)) (otherCircles updatedWorld)
                  newRandomCircle = randomPosition updatedGen -- Generate a new random circle
 
