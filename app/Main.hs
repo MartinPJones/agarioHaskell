@@ -1,4 +1,5 @@
 {-# LANGUAGE NamedFieldPuns #-}
+
 import Graphics.Gloss
 import Graphics.Gloss.Interface.Pure.Game
 import System.Random
@@ -6,32 +7,58 @@ import System.Random
 type Position = (Float, Float)
 type Velocity = (Float, Float)
 
+data GameState = Playing | Lost deriving Eq
+
 data World = World {
     circlePos :: Position,
     circleVel :: Velocity,
     radius :: Float,
     otherRadius :: Float,
     otherCircles :: [Position],
+    evilCircles :: [Position],
+    evilVelocities :: [Velocity],
+    score :: Int,
+    gameState :: GameState,
     rndGen :: StdGen,
-    timePassed :: Float
-} deriving Show
+    timePassed :: Float,
+    level :: Int
+}
 
--- Intial frame size
 width, height :: Int
 width = 800
 height = 600
 
-numCircles :: Int
-numCircles = 5
+timeThreshold :: Float
+timeThreshold = 0.5
 
 randomPosition :: StdGen -> Position
 randomPosition g =
     let
-        (genX, newGenY) = randomR (-700, 700) g -- Generates dots in bounds, change ints to change bounds
+        (genX, newGenY) = randomR (-800, 800) g
         x = genX
-        (genY, newGen) = randomR (-700, 700) newGenY
+        (genY, newGen) = randomR (-600, 600) newGenY
         y = genY
     in (x, y)
+
+randomEdge :: StdGen -> Position
+randomEdge g =
+    let
+        (edge, newGen) = randomR (0 :: Int, 3 :: Int) g
+        (x, y) = case edge of
+            0 -> (-800, fst $ randomR (-600, 600) newGen)
+            1 -> (800, fst $ randomR (-600, 600) newGen)
+            2 -> (fst $ randomR (-800, 800) newGen, -600)
+            _ -> (fst $ randomR (-800, 800) newGen, 600)
+    in (x, y)
+
+randomVelocity :: StdGen -> Velocity
+randomVelocity g  =
+    let
+        (genX, newGenY) = randomR (-3.0, 3.0) g
+        vx = genX
+        (genY, newGen) = randomR (-3.0, 3.0) newGenY
+        vy = genY
+    in (vx, vy)
 
 initialWorld :: World
 initialWorld = World {
@@ -40,8 +67,13 @@ initialWorld = World {
     radius = 30,
     otherRadius = 8,
     otherCircles = [],
-    rndGen = mkStdGen 0, -- Initialization, not used seed
-    timePassed = 0
+    evilCircles = [],
+    evilVelocities = [],
+    score = 0,
+    gameState = Playing,
+    rndGen = mkStdGen 0,
+    timePassed = 0,
+    level = 1
 }
 
 areColliding :: World -> Position -> Bool
@@ -49,97 +81,100 @@ areColliding world (x2, y2) =
     let (x1, y1) = circlePos world
     in sqrt ((x2 - x1)^2 + (y2 - y1)^2) < radius world + otherRadius world
 
-moveTowardsMouse :: Float -> Position -> World -> World
-moveTowardsMouse deltaTime (mouseX, mouseY) world =
-    let (cx, cy) = circlePos world
-        maxSpeed = 20.0  -- You can adjust the maximum speed here
-        directionX = mouseX - cx
-        directionY = mouseY - cy
-        distance = sqrt (directionX ^ 2 + directionY ^ 2)
-        (currentVelX, currentVelY) = circleVel world
-        (newVelX, newVelY) = if distance == 0 -- Idk why I thought this was a good idea. Need to change it to if mouse position hasn't been updated, maintain current velocity
-                                then (currentVelX, currentVelY) -- Retain current velocity if no movement
-                                else let speed = min maxSpeed distance
-                                         normalizedDirX = directionX / distance
-                                         normalizedDirY = directionY / distance
-                                     in (speed * normalizedDirX, speed * normalizedDirY)
-        newCirclePos = (cx + newVelX * deltaTime, cy + newVelY * deltaTime)
-    in world { circleVel = (newVelX, newVelY), circlePos = newCirclePos }
-
--- Define a time threshold for circle addition
-timeThreshold :: Float
-timeThreshold = 5.0  -- Change this value as needed for the interval between new circle additions
+handleInput :: Event -> World -> World
+handleInput (EventMotion (x, y)) world
+    | gameState world == Playing =
+        let (cx, cy) = circlePos world
+            lag = 0.1
+            x1 = cx + (x - cx) * lag
+            y1 = cy + (y - cy) * lag
+        in world { circlePos = (x1, y1) }
+    | otherwise = world  -- stops during game over screen
+handleInput (EventKey (Char 'r') Down _ _) world =
+    initialWorld  -- restart
+handleInput _ world = world
 
 updateWorld :: Float -> StdGen -> World -> World
 updateWorld deltaTime gen world =
     let
-        -- updatedWorld = moveTowardsMouse deltaTime (mousePosToWorldCoords world) world
-        updatedWorld = world
-
-        -- Update the timer by adding the elapsed time
         newTimer = deltaTime + timePassed world
-        updatedGen = snd (split gen) -- Generate a new random generator
-
-        -- Check if it's time to add a new circle
-        addNewCircle = newTimer >= timeThreshold
-
-        updatedWorldWithNewCircle =
-            if addNewCircle
-                then let newRandomCircle = randomPosition updatedGen -- Generate a new random circle
-                     in updatedWorld {
-                         otherCircles = otherCircles updatedWorld ++ [newRandomCircle],
-                         timePassed = 0,  -- Reset the timer after adding a new circle
-                         rndGen = updatedGen -- Replace the generator to maintain randomness
+        updatedGen = snd (split gen)
+        addCircles = newTimer >= timeThreshold
+        updatedWorld =
+            if addCircles
+                then let newEvilCircle = randomEdge updatedGen
+                         updatedGen2 = snd $ split updatedGen
+                         newRandomCircle = randomPosition updatedGen2
+                         updatedGen3 = snd $ split updatedGen2
+                         newEvilVelocity = randomVelocity updatedGen3
+                     in world {
+                         otherCircles = otherCircles world ++ [newRandomCircle],
+                         evilCircles = evilCircles world ++ [newEvilCircle],
+                         evilVelocities = evilVelocities world ++ [newEvilVelocity],
+                         timePassed = 0,
+                         rndGen = updatedGen3
                      }
-                else updatedWorld { timePassed = newTimer }
+                else world { timePassed = newTimer }
 
-        -- Check for collisions after potential updates
+        newEvilCircles = zipWith (\(x, y) (vx, vy) -> (x + vx, y + vy)) (evilCircles updatedWorld) (evilVelocities updatedWorld)
         collidedPositions = filter (areColliding updatedWorld) (otherCircles updatedWorld)
-    in if not (null collidedPositions)
-        then let newRadius = radius updatedWorld + 3 -- Amount to increase size by
-                 updatedCircles = filter (not . (`elem` collidedPositions)) (otherCircles updatedWorld)
-                 newRandomCircle = randomPosition updatedGen -- Generate a new random circle
 
-             in updatedWorldWithNewCircle {
-                 radius = newRadius,
-                 otherCircles = updatedCircles ++ [newRandomCircle],
-                 rndGen = updatedGen -- Replace the generator to maintain randomness
-             }
-        else updatedWorldWithNewCircle
-
--- Helper function to convert mouse coordinates to world coordinates
-mousePosToWorldCoords :: World -> Position
-mousePosToWorldCoords world =
-    let (mouseX, mouseY) = circlePos world
-        worldWidth = fromIntegral width
-        worldHeight = fromIntegral height
-    in ((mouseX - worldWidth / 2) * 2, (worldHeight / 2 - mouseY) * 2)
+        scoreIncrease = length collidedPositions
+        updatedScore = score updatedWorld + scoreIncrease
+        updatedLevel = determineLevel updatedScore
+    in
+        if any (areColliding updatedWorld) (otherCircles updatedWorld)
+            then
+                let newRadius = radius updatedWorld + 1
+                in updatedWorld { radius = newRadius, otherCircles = filter (not . areColliding updatedWorld) (otherCircles updatedWorld), evilCircles = newEvilCircles, rndGen = updatedGen, score = updatedScore, level = updatedLevel }
+            else
+                if any (areColliding updatedWorld) (evilCircles updatedWorld)
+                    then
+                        updatedWorld { gameState = Lost }
+                    else
+                        updatedWorld { evilCircles = newEvilCircles, score = updatedScore, level = updatedLevel }
+  where
+    determineLevel :: Int -> Int
+    determineLevel s
+        | s >= 100 = 5
+        | s >= 50 = 4
+        | s >= 25 = 3
+        | s >= 10 = 2
+        | s >= 1 = 1
+        | otherwise = 1
 
 render :: World -> Picture
-render world = pictures $ mainCircle : otherCirclesPictures
-  where
-    (x, y) = circlePos world
-    mainCircle = translate x y $ color blue $ circleSolid (radius world)
-    otherCirclesPictures = map (\(cx, cy) -> translate cx cy $ color red $ circleSolid (otherRadius world)) (otherCircles world)
+render world
+    | gameState world == Lost =
+        pictures [gameoverText, restartText, scoreText]
+    | otherwise =
+        pictures $ mainCircle : foodCircles ++ badCircles ++ [scoreText]
+   where
+        (x, y) = circlePos world
+        mainCircle = translate x y $ color (levelColor $ level world) $ circleSolid (radius world)
+        foodCircles = map (\(cx, cy) -> translate cx cy $ color green $ circleSolid (otherRadius world)) (otherCircles world)
+        badCircles = map (\(cx, cy) -> translate cx cy $ color red $ circleSolid (otherRadius world)) (evilCircles world)
+        gameoverText = translate (-200) 0 $ color black $ scale 0.5 0.5 $ text "GAME OVER"
+        restartText = translate (-170) (-60) $ color black $ scale 0.25 0.25 $ text "Press R to restart!"
+        scoreText = translate (-370) 270 $ color black $ scale 0.25 0.25 $ text $ "Score: " ++ show (score world) ++ "   Level: " ++ show (level world)
 
-renderWithCamera :: World -> Picture
-renderWithCamera world =
-    translate (-circleX) (-circleY) $ pictures [renderWorld, renderCircle]
-    where
-        (circleX, circleY) = circlePos world
-        renderWorld = render world
-        renderCircle = translate circleX circleY $ color blue $ circleSolid (radius world)
+        levelColor :: Int -> Color
+        levelColor l
+            | l == 1 = magenta
+            | l == 2 = cyan
+            | l == 3 = yellow
+            | l == 4 = orange
+            | l == 5 = blue
+            | otherwise = blue
 
 main :: IO ()
 main = do
-    gen <- getStdGen -- Get the initial random generator
+    gen <- getStdGen
     play
         (InWindow "Agar.io" (width, height) (100, 100))
-        white
-        60
-        (initialWorld { rndGen = gen }) -- Pass the initial random generator to the world state
-        renderWithCamera
-        (\event world -> case event of
-            EventMotion pos -> moveTowardsMouse 0.1 pos world
-            _ -> world)
-        (\dt world -> updateWorld dt (rndGen world) world) -- Update function now takes a StdGen parameter
+        white -- background color
+        60 -- fps
+        (initialWorld { rndGen = gen })
+        render
+        handleInput
+        (\dt world -> updateWorld dt (rndGen world) world)
