@@ -29,7 +29,7 @@ width = 800
 height = 600
 
 timeThreshold :: Float
-timeThreshold = 0.5
+timeThreshold = 0.1
 
 randomPosition :: StdGen -> Position
 randomPosition g =
@@ -73,7 +73,7 @@ initialWorld = World {
     gameState = Playing,
     rndGen = mkStdGen 0,
     timePassed = 0,
-    level = 1
+    level = 0
 }
 
 areColliding :: World -> Position -> Bool
@@ -125,7 +125,7 @@ updateWorld deltaTime gen world =
     in
         if any (areColliding updatedWorld) (otherCircles updatedWorld)
             then
-                let newRadius = radius updatedWorld + 1
+                let newRadius = radius updatedWorld + 0.5
                 in updatedWorld { radius = newRadius, otherCircles = filter (not . areColliding updatedWorld) (otherCircles updatedWorld), evilCircles = newEvilCircles, rndGen = updatedGen, score = updatedScore, level = updatedLevel }
             else
                 if any (areColliding updatedWorld) (evilCircles updatedWorld)
@@ -137,11 +137,11 @@ updateWorld deltaTime gen world =
     determineLevel :: Int -> Int
     determineLevel s
         | s >= 100 = 5
-        | s >= 50 = 4
-        | s >= 25 = 3
-        | s >= 10 = 2
-        | s >= 1 = 1
-        | otherwise = 1
+        | s >= 80 = 4
+        | s >= 60 = 3
+        | s >= 40 = 2
+        | s >= 20 = 1
+        | otherwise = 0
 
 render :: World -> Picture
 render world
@@ -160,6 +160,7 @@ render world
 
         levelColor :: Int -> Color
         levelColor l
+            | l == 0 = black
             | l == 1 = magenta
             | l == 2 = cyan
             | l == 3 = yellow
